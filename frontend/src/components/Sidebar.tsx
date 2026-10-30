@@ -1,5 +1,15 @@
 import React from 'react';
-import { LayoutDashboard, Compass, GitMerge, FileCode, CheckSquare, Zap, Activity, ShieldAlert, Cpu } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Server,
+  GitMerge,
+  FileCode,
+  CheckSquare,
+  Zap,
+  ShieldCheck,
+  Cpu,
+  Activity
+} from 'lucide-react';
 
 interface SidebarProps {
   currentTab: string;
@@ -9,17 +19,19 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'clusters', label: 'Cluster Explorer', icon: Server, badge: 'Live' },
     { id: 'wizard', label: 'Migration Studio', icon: GitMerge, badge: 'Active' },
     { id: 'diff', label: 'YAML Diff Viewer', icon: FileCode },
     { id: 'developer', label: 'Developer Portal', icon: CheckSquare, badge: 'Gate' },
     { id: 'cutover', label: 'Cutover & Rollback', icon: Zap, badge: '0-Down' },
+    { id: 'audit', label: 'Audit Explorer', icon: ShieldCheck },
     { id: 'integrations', label: 'Cloud Integrations', icon: Cpu },
   ];
 
   return (
-    <aside style={{ width: '250px', padding: '0 0 0 24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <aside style={{ width: '260px', padding: '0 0 0 24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div style={{ padding: '8px 12px', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-        Navigation
+        KMM Navigation
       </div>
       {navItems.map((item) => {
         const Icon = item.icon;
@@ -32,13 +44,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              padding: '12px 16px',
+              padding: '11px 16px',
               borderRadius: '10px',
-              background: isActive ? 'linear-gradient(90deg, rgba(6, 182, 212, 0.15) 0%, rgba(99, 102, 241, 0.08) 100%)' : 'transparent',
+              background: isActive
+                ? 'linear-gradient(90deg, rgba(6, 182, 212, 0.15) 0%, rgba(99, 102, 241, 0.08) 100%)'
+                : 'transparent',
               border: isActive ? '1px solid var(--border-highlight)' : '1px solid transparent',
               color: isActive ? '#FFFFFF' : 'var(--text-muted)',
               fontWeight: isActive ? 600 : 500,
-              fontSize: '0.875rem',
+              fontSize: '0.85rem',
               cursor: 'pointer',
               textAlign: 'left',
               transition: 'all 0.2s ease'
@@ -49,7 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
               <span>{item.label}</span>
             </div>
             {item.badge && (
-              <span className={isActive ? 'badge badge-info' : 'badge badge-purple'} style={{ fontSize: '0.65rem' }}>
+              <span className={isActive ? 'badge badge-info' : 'badge badge-purple'} style={{ fontSize: '0.62rem' }}>
                 {item.badge}
               </span>
             )}
@@ -57,7 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
         );
       })}
 
-      {/* SLA & Principle Card */}
+      {/* Target SLA Card */}
       <div className="glass-panel" style={{ marginTop: 'auto', marginBottom: '24px', padding: '16px', background: 'rgba(15, 23, 42, 0.6)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
           <Activity size={16} color="var(--accent-emerald)" />

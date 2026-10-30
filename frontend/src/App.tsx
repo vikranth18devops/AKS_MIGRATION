@@ -2,13 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
+import { ClusterExplorerView } from './components/ClusterExplorerView';
 import { MigrationWizard } from './components/MigrationWizard';
 import { DeveloperPortal } from './components/DeveloperPortal';
 import { CutoverConsole } from './components/CutoverConsole';
 import { DiffViewer } from './components/DiffViewer';
+import { AuditExplorerView } from './components/AuditExplorerView';
 import { IntegrationsView } from './components/IntegrationsView';
+import { NewMigrationModal } from './components/NewMigrationModal';
 import { api } from './services/api';
-import { Migration, Cluster } from './types';
+import { Migration, Cluster, DiscoveredIngress } from './types';
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
@@ -16,6 +19,11 @@ export function App() {
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [migrations, setMigrations] = useState<Migration[]>([]);
   const [selectedMigration, setSelectedMigration] = useState<Migration | null>(null);
+
+  // New Migration Modal State
+  const [showNewMigModal, setShowNewMigModal] = useState<boolean>(false);
+  const [modalInitialClusterId, setModalInitialClusterId] = useState<string>('');
+  const [modalInitialIngress, setModalInitialIngress] = useState<DiscoveredIngress | null>(null);
 
   const loadData = async () => {
     const [cList, mList] = await Promise.all([api.getClusters(), api.getMigrations()]);
@@ -30,6 +38,22 @@ export function App() {
     loadData();
   }, []);
 
+  const handleInitiateMigrationFromExplorer = (clusterId: string, ingress: DiscoveredIngress) => {
+    setModalInitialClusterId(clusterId);
+    setModalInitialIngress(ingress);
+    setShowNewMigModal(true);
+  };
+
+  const handleMigrationCreated = async (newMigrationId: string) => {
+    setShowNewMigModal(false);
+    await loadData();
+    const found = (await api.getMigrations()).find((m) => m.id === newMigrationId);
+    if (found) {
+      setSelectedMigration(found);
+    }
+    setCurrentTab('wizard');
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Navbar currentRole={currentRole} onRoleChange={setCurrentRole} />
@@ -43,8 +67,20 @@ export function App() {
               migrations={migrations}
               clusters={clusters}
               onSelectMigration={(mig) => setSelectedMigration(mig)}
-              onOpenWizard={() => setCurrentTab('wizard')}
+              onOpenWizard={() => {
+                setModalInitialClusterId('');
+                setModalInitialIngress(null);
+                setShowNewMigModal(true);
+              }}
               onNavigateToTab={(tab) => setCurrentTab(tab)}
+            />
+          )}
+
+          {currentTab === 'clusters' && (
+            <ClusterExplorerView
+              clusters={clusters}
+              onRefreshClusters={loadData}
+              onInitiateMigration={handleInitiateMigrationFromExplorer}
             />
           )}
 
@@ -69,9 +105,21 @@ export function App() {
             <CutoverConsole migration={selectedMigration} onRefresh={loadData} />
           )}
 
+          {currentTab === 'audit' && <AuditExplorerView />}
+
           {currentTab === 'integrations' && <IntegrationsView />}
         </main>
       </div>
+
+      {showNewMigModal && (
+        <NewMigrationModal
+          clusters={clusters}
+          initialClusterId={modalInitialClusterId}
+          initialIngress={modalInitialIngress}
+          onClose={() => setShowNewMigModal(false)}
+          onSuccess={handleMigrationCreated}
+        />
+      )}
     </div>
   );
 }
