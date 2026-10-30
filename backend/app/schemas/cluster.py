@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,10 +21,30 @@ class ClusterResponse(BaseModel):
     api_endpoint: str
     kubernetes_version: Optional[str] = None
     status: str
+    is_authenticated: bool = False
+    auth_method: Optional[str] = None
     created_at: datetime
+
+class ClusterAuthRequest(BaseModel):
+    auth_method: str = Field("AWS_IAM_ROLE", description="AWS_IAM_ROLE, SERVICE_ACCOUNT_TOKEN, or KUBECONFIG_OIDC")
+    role_arn: Optional[str] = None
+    token: Optional[str] = None
+    kubeconfig_yaml: Optional[str] = None
+
+class ClusterAuthResponse(BaseModel):
+    is_authenticated: bool
+    cluster_id: UUID
+    cluster_name: str
+    auth_method: str
+    authenticated_identity: str
+    kubernetes_version: str
+    permissions: Dict[str, bool]
+    authenticated_at: datetime
+    message: str
 
 class ClusterTestConnectionResponse(BaseModel):
     is_connected: bool
+    is_authenticated: bool
     kubernetes_version: Optional[str] = None
     namespaces_count: int = 0
     can_manage_ingress: bool = True

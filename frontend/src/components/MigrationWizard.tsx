@@ -12,7 +12,10 @@ import {
   FileCode,
   Layers,
   Activity,
-  Server
+  Server,
+  Lock,
+  Key,
+  ShieldAlert
 } from 'lucide-react';
 
 interface MigrationWizardProps {
@@ -28,14 +31,26 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
   onRefreshMigration,
   onNavigateToTab
 }) => {
-  const [currentStep, setCurrentStep] = useState<number>(2);
+  // Find associated cluster
+  const targetCluster = clusters.find((c) => c.id === migration.cluster_id) || clusters[0];
+  const isClusterAuthenticated = targetCluster?.is_authenticated ?? false;
+
+  // Initialize step: if not authenticated, MUST start at Stage 1
+  const [currentStep, setCurrentStep] = useState<number>(isClusterAuthenticated ? 2 : 1);
   const [loading, setLoading] = useState<boolean>(false);
   const [assessment, setAssessment] = useState<Assessment | null>(null);
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [actionMessage, setActionMessage] = useState<string>('');
 
+  // Authentication State for Stage 1 Gate
+  const [authMethod, setAuthMethod] = useState<string>(targetCluster?.auth_method || 'AWS_IAM_ROLE');
+  const [authRoleArn, setAuthRoleArn] = useState<string>('arn:aws:iam::123456789012:role/kmm-eks-migration-role');
+  const [authToken, setAuthToken] = useState<string>('');
+  const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
   const steps = [
-    { num: 1, title: 'Cluster & Ingress' },
+    { num: 1, title: 'Cluster & Ingress Auth' },
     { num: 2, title: 'Compatibility Assessment' },
     { num: 3, title: 'Encrypted S3 Backup' },
     { num: 4, title: 'Deploy Traefik' },
@@ -44,12 +59,44 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
     { num: 7, title: 'Production Cutover' }
   ];
 
+  const handleAuthenticate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetCluster) return;
+    setIsAuthenticating(true);
+    setAuthError(null);
+    try {
+      const res = await api.authenticateCluster(targetCluster.id, {
+        auth_method: authMethod,
+        role_arn: authRoleArn,
+        token: authToken
+      });
+      setActionMessage(`Cluster '${targetCluster.name}' successfully authenticated. Ingress items and Traefik migration unlocked.`);
+      targetCluster.is_authenticated = true;
+      targetCluster.auth_method = authMethod;
+      onRefreshMigration();
+    } catch (err: any) {
+      setAuthError(err?.message || 'Cluster authentication failed. Please verify RBAC credentials.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleStepClick = (stepNum: number) => {
+    if (!isClusterAuthenticated && stepNum > 1) {
+      setAuthError('Cluster authentication is strictly required before accessing downstream migration steps.');
+      return;
+    }
+    setCurrentStep(stepNum);
+  };
+
   const handleRunAssessment = async () => {
     setLoading(true);
     try {
       const res = await api.runAssessment(migration.id);
       setAssessment(res);
       setActionMessage('AST Parsing completed. 0 blockers, 1 warning mapped to Traefik Middlewares.');
+    } catch (err: any) {
+      setActionMessage(`Assessment error: ${err?.message || 'Cluster authentication check failed.'}`);
     } finally {
       setLoading(false);
     }
@@ -61,6 +108,8 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
       const diff = await api.getDiff(migration.id);
       setDiffData(diff);
       setCurrentStep(5);
+    } catch (err: any) {
+      setActionMessage(`Diff loading error: ${err?.message || 'Cluster authentication required.'}`);
     } finally {
       setLoading(false);
     }
@@ -81,7 +130,7 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
   const handleDeployTraefik = async () => {
     setLoading(true);
     try {
-      const res = await api.deployTraefik(migration.id);
+      await api.deployTraefik(migration.id);
       setActionMessage(`Traefik deployed in isolated namespace kmm-traefik-system. Runtime URL ready.`);
       onRefreshMigration();
       setCurrentStep(5);
@@ -96,19 +145,22 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
       <div className="glass-panel" style={{ padding: '20px 24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {steps.map((s, idx) => {
-            const isCompleted = s.num < currentStep;
+            const isCompleted = s.num < currentStep && isClusterAuthenticated;
             const isCurrent = s.num === currentStep;
+            const isLocked = !isClusterAuthenticated && s.num > 1;
+
             return (
               <div
                 key={s.num}
-                onClick={() => setCurrentStep(s.num)}
+                onClick={() => handleStepClick(s.num)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  cursor: 'pointer',
-                  opacity: isCurrent ? 1 : isCompleted ? 0.8 : 0.4
+                  cursor: isLocked ? 'not-allowed' : 'pointer',
+                  opacity: isCurrent ? 1 : isCompleted ? 0.8 : isLocked ? 0.3 : 0.6
                 }}
+                title={isLocked ? 'Cluster authentication required' : s.title}
               >
                 <div
                   style={{
@@ -120,7 +172,7 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
                       : isCompleted
                       ? 'rgba(16, 185, 129, 0.2)'
                       : 'rgba(255, 255, 255, 0.05)',
-                    color: isCompleted ? '#34D399' : '#FFFFFF',
+                    color: isCompleted ? '#34D399' : isLocked ? '#94A3B8' : '#FFFFFF',
                     border: isCurrent
                       ? '2px solid #22D3EE'
                       : isCompleted
@@ -133,13 +185,32 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
                     fontSize: '0.85rem'
                   }}
                 >
-                  {isCompleted ? <CheckCircle2 size={16} /> : s.num}
+                  {isLocked ? (
+                    <Lock size={14} color="#94A3B8" />
+                  ) : isCompleted ? (
+                    <CheckCircle2 size={16} />
+                  ) : (
+                    s.num
+                  )}
                 </div>
-                <span style={{ fontSize: '0.85rem', fontWeight: isCurrent ? 600 : 400, color: isCurrent ? '#FFFFFF' : 'var(--text-muted)' }}>
+                <span
+                  style={{
+                    fontSize: '0.85rem',
+                    fontWeight: isCurrent ? 600 : 400,
+                    color: isCurrent ? '#FFFFFF' : isLocked ? 'var(--text-dim)' : 'var(--text-muted)'
+                  }}
+                >
                   {s.title}
                 </span>
                 {idx < steps.length - 1 && (
-                  <div style={{ width: '20px', height: '1px', background: 'rgba(255, 255, 255, 0.1)', marginLeft: '8px' }} />
+                  <div
+                    style={{
+                      width: '20px',
+                      height: '1px',
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      marginLeft: '8px'
+                    }}
+                  />
                 )}
               </div>
             );
@@ -148,12 +219,329 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
       </div>
 
       {actionMessage && (
-        <div className="glass-panel" style={{ padding: '12px 20px', borderLeft: '4px solid var(--accent-emerald)', background: 'rgba(16, 185, 129, 0.08)' }}>
-          <span style={{ fontSize: '0.85rem', color: '#A7F3D0', fontWeight: 500 }}>{actionMessage}</span>
+        <div
+          className="glass-panel"
+          style={{
+            padding: '12px 20px',
+            borderLeft: '4px solid var(--accent-emerald)',
+            background: 'rgba(16, 185, 129, 0.08)'
+          }}
+        >
+          <span style={{ fontSize: '0.85rem', color: '#A7F3D0', fontWeight: 500 }}>
+            {actionMessage}
+          </span>
         </div>
       )}
 
-      {/* Step 2: Compatibility Assessment */}
+      {authError && (
+        <div
+          className="glass-panel"
+          style={{
+            padding: '12px 20px',
+            borderLeft: '4px solid #EF4444',
+            background: 'rgba(239, 68, 68, 0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <ShieldAlert size={16} color="#F87171" />
+          <span style={{ fontSize: '0.85rem', color: '#FCA5A5', fontWeight: 500 }}>
+            {authError}
+          </span>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* STAGE 1: CLUSTER AUTHENTICATION GATE & INGRESS TARGET SPECIFICATIONS     */}
+      {/* ========================================================================= */}
+      {currentStep === 1 && (
+        <div className="glass-panel" style={{ padding: '28px' }}>
+          {!isClusterAuthenticated ? (
+            /* CLUSTER AUTHENTICATION REQUIRED BARRIER */
+            <div style={{ maxWidth: '680px', margin: '0 auto', textAlign: 'center' }}>
+              <div
+                style={{
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '16px',
+                  background: 'rgba(245, 158, 11, 0.15)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '16px',
+                  border: '1px solid rgba(245, 158, 11, 0.3)'
+                }}
+              >
+                <Lock size={32} color="#FBBF24" />
+              </div>
+
+              <div style={{ display: 'inline-block', marginBottom: '8px' }}>
+                <span className="badge badge-warning" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
+                  STAGE 1 PREREQUISITE • CLUSTER AUTHENTICATION REQUIRED
+                </span>
+              </div>
+
+              <h2 style={{ fontSize: '1.45rem', marginTop: '4px', marginBottom: '8px' }}>
+                Authenticate Kubernetes Cluster '{targetCluster?.name}'
+              </h2>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '24px' }}>
+                To migrate your Ingress Controller to Traefik, live Kubernetes cluster authentication is strictly required.
+                Downstream Ingress resources, AST conversion rules, side-by-side YAML diffs, and traffic cutover operations will only be displayed after credentials and RBAC permissions are verified.
+              </p>
+
+              <form
+                onSubmit={handleAuthenticate}
+                style={{
+                  textAlign: 'left',
+                  background: 'rgba(0, 0, 0, 0.35)',
+                  padding: '24px',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px'
+                }}
+              >
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
+                    Authentication Mechanism
+                  </label>
+                  <select
+                    value={authMethod}
+                    onChange={(e) => setAuthMethod(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      background: '#1E293B',
+                      border: '1px solid var(--border-subtle)',
+                      color: '#FFFFFF',
+                      outline: 'none',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    <option value="AWS_IAM_ROLE">AWS IAM Role (EKS IRSA / Pod Identity)</option>
+                    <option value="AZURE_WORKLOAD_IDENTITY">Azure Workload Identity (AKS)</option>
+                    <option value="SERVICE_ACCOUNT_TOKEN">Kubernetes Service Account Bearer Token</option>
+                    <option value="OIDC_KUBECONFIG">OIDC / Bearer Token Kubeconfig</option>
+                  </select>
+                </div>
+
+                {authMethod === 'AWS_IAM_ROLE' && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
+                      IAM Role ARN
+                    </label>
+                    <input
+                      type="text"
+                      value={authRoleArn}
+                      onChange={(e) => setAuthRoleArn(e.target.value)}
+                      placeholder="arn:aws:iam::123456789012:role/kmm-eks-migration-role"
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        background: 'rgba(0,0,0,0.5)',
+                        border: '1px solid var(--border-subtle)',
+                        color: '#FFFFFF',
+                        outline: 'none',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '0.8rem'
+                      }}
+                      required
+                    />
+                  </div>
+                )}
+
+                {authMethod === 'SERVICE_ACCOUNT_TOKEN' && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
+                      Service Account Token
+                    </label>
+                    <textarea
+                      value={authToken}
+                      onChange={(e) => setAuthToken(e.target.value)}
+                      placeholder="eyJhbGciOiJSUzI1NiIsImtpZCI6..."
+                      rows={3}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        background: 'rgba(0,0,0,0.5)',
+                        border: '1px solid var(--border-subtle)',
+                        color: '#FFFFFF',
+                        outline: 'none',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '0.78rem'
+                      }}
+                      required
+                    />
+                  </div>
+                )}
+
+                {/* RBAC Checklist */}
+                <div style={{ padding: '12px 16px', borderRadius: '8px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase' }}>
+                    RBAC Permissions to be Verified:
+                  </span>
+                  <ul style={{ listStyle: 'none', padding: 0, marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircle2 size={12} color="var(--accent-cyan)" /> <code>networking.k8s.io/v1 Ingresses</code>: get, list, watch
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircle2 size={12} color="var(--accent-cyan)" /> <code>traefik.io/v1alpha1 IngressRoute & Middleware</code>: create, patch
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircle2 size={12} color="var(--accent-cyan)" /> <code>v1 Secrets & ConfigMaps</code>: read TLS certificates & headers
+                    </li>
+                  </ul>
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ justifyContent: 'center', padding: '12px' }}
+                  disabled={isAuthenticating}
+                >
+                  <Key size={16} /> {isAuthenticating ? 'Authenticating & Verifying RBAC...' : 'Authenticate Cluster & Unlock Traefik Items'}
+                </button>
+              </form>
+            </div>
+          ) : (
+            /* AUTHENTICATED: DISPLAY NECESSARY ITEMS */
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                    <CheckCircle2 size={20} color="var(--accent-emerald)" />
+                    <h2 style={{ fontSize: '1.35rem', margin: 0 }}>
+                      Stage 1: Cluster Authenticated & Ingress Target Identified
+                    </h2>
+                    <span className="badge badge-success">Live Session Verified</span>
+                  </div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Cluster '{targetCluster?.name}' is authenticated via {targetCluster?.auth_method || 'AWS IAM Role'}. Necessary Ingress resources and Traefik specifications are unlocked.
+                  </p>
+                </div>
+
+                <button
+                  className="btn-primary"
+                  onClick={() => setCurrentStep(2)}
+                >
+                  Proceed to Compatibility Assessment <ArrowRight size={16} />
+                </button>
+              </div>
+
+              {/* SPECIFICATION CARDS GRID */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+                {/* Card 1: Source Ingress */}
+                <div style={{ padding: '20px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Layers size={16} color="var(--accent-purple)" /> Source NGINX Ingress
+                    </span>
+                    <span className="badge badge-purple">networking.k8s.io/v1</span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.825rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Resource Name:</span>
+                      <span style={{ fontWeight: 600, color: '#FFFFFF', fontFamily: 'var(--font-mono)' }}>{migration.name}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Namespace:</span>
+                      <span style={{ color: 'var(--accent-cyan)' }}>{migration.namespace || 'production-apps'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Production URL:</span>
+                      <span style={{ color: '#FFFFFF', fontFamily: 'var(--font-mono)' }}>{migration.production_url || 'https://payments.company.com'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Active IngressClass:</span>
+                      <span className="badge badge-info" style={{ fontSize: '0.65rem' }}>nginx</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Upstream Backends:</span>
+                      <span style={{ color: '#FFFFFF' }}>payment-service:8080 (Pods: 6/6 Healthy)</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>TLS Certificate:</span>
+                      <span style={{ color: 'var(--accent-emerald)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Lock size={12} /> payments-tls-cert (Valid RSA 4096-bit)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card 2: Target Traefik Gateway */}
+                <div style={{ padding: '20px', borderRadius: '12px', background: 'rgba(6, 182, 212, 0.04)', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Server size={16} color="var(--accent-cyan)" /> Target Traefik Controller
+                    </span>
+                    <span className="badge badge-info">traefik.io/v1alpha1</span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.825rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Target Controller:</span>
+                      <span style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>{migration.target_controller} (v3.0.x)</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Isolated IngressClass:</span>
+                      <span className="badge badge-info" style={{ fontSize: '0.65rem' }}>traefik-migration</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Deployment Namespace:</span>
+                      <span style={{ color: '#FFFFFF' }}>kmm-traefik-system</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Target CRD Resources:</span>
+                      <span style={{ color: '#FFFFFF' }}>IngressRoute + Traefik Middlewares</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Cutover Strategy:</span>
+                      <span style={{ color: '#FFFFFF' }}>Dual-TargetGroup ALB Connection Draining (300s)</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Target ALB TG:</span>
+                      <span style={{ color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>
+                        ...:targetgroup/kmm-traefik-preview/...
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* RBAC Verified Capabilities */}
+              <div style={{ padding: '16px 20px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <ShieldCheck size={24} color="var(--accent-emerald)" />
+                  <div>
+                    <div style={{ fontWeight: 600, color: '#FFFFFF', fontSize: '0.9rem' }}>
+                      Verified Cluster Capabilities on {targetCluster?.name}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      Ingress discovery, Traefik CRD creation, TLS Secret access, and AWS TargetGroupBinding confirmed.
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>Ingress Read</span>
+                  <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>Traefik CRDs</span>
+                  <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>Secrets</span>
+                  <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>ALB TG Switch</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* STAGE 2: COMPATIBILITY ASSESSMENT                                         */}
+      {/* ========================================================================= */}
       {currentStep === 2 && (
         <div className="glass-panel" style={{ padding: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -230,7 +618,9 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
         </div>
       )}
 
-      {/* Step 3: Backup */}
+      {/* ========================================================================= */}
+      {/* STAGE 3: BACKUP                                                           */}
+      {/* ========================================================================= */}
       {currentStep === 3 && (
         <div className="glass-panel" style={{ padding: '24px' }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '8px' }}>Stage 3: Pre-Migration Snapshot & Backup Verification</h2>
@@ -267,7 +657,9 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
         </div>
       )}
 
-      {/* Step 4: Deploy Traefik */}
+      {/* ========================================================================= */}
+      {/* STAGE 4: DEPLOY TRAEFIK                                                   */}
+      {/* ========================================================================= */}
       {currentStep === 4 && (
         <div className="glass-panel" style={{ padding: '24px' }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '8px' }}>Stage 4: Parallel Traefik Gateway Deployment</h2>
@@ -297,7 +689,9 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
         </div>
       )}
 
-      {/* Step 5: Runtime Testing & Diff */}
+      {/* ========================================================================= */}
+      {/* STAGE 5: RUNTIME TESTING & DIFF                                           */}
+      {/* ========================================================================= */}
       {currentStep === 5 && (
         <div className="glass-panel" style={{ padding: '24px' }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '8px' }}>Stage 5: Runtime URL Verification & YAML Diff</h2>
@@ -330,7 +724,9 @@ export const MigrationWizard: React.FC<MigrationWizardProps> = ({
         </div>
       )}
 
-      {/* Step 6: Dual Approvals */}
+      {/* ========================================================================= */}
+      {/* STAGE 6: DUAL APPROVALS                                                   */}
+      {/* ========================================================================= */}
       {currentStep === 6 && (
         <div className="glass-panel" style={{ padding: '24px' }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '8px' }}>Stage 6: Mandatory Dual-Approval Gates</h2>

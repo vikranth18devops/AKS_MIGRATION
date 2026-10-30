@@ -19,9 +19,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const activeCount = migrations.filter(m => m.current_state !== 'COMPLETED' && m.current_state !== 'ROLLED_BACK').length;
   const verifiedBackupCount = migrations.filter(m => m.has_verified_backup).length;
+  const unauthClusters = clusters.filter(c => !c.is_authenticated);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {/* Cluster Authentication Alert Banner */}
+      {unauthClusters.length > 0 && (
+        <div
+          className="glass-panel"
+          style={{
+            padding: '16px 20px',
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            background: 'linear-gradient(90deg, rgba(245, 158, 11, 0.12) 0%, rgba(245, 158, 11, 0.04) 100%)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <AlertTriangle size={20} color="#FBBF24" />
+            <div>
+              <div style={{ fontWeight: 600, color: '#FDE68A', fontSize: '0.9rem' }}>
+                Cluster Authentication Required ({unauthClusters.length} Cluster{unauthClusters.length > 1 ? 's' : ''} Pending)
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {unauthClusters.map(c => c.name).join(', ')} requires authentication. Live Ingress discovery and Traefik migration steps are locked until credentials are verified.
+              </div>
+            </div>
+          </div>
+          <button
+            className="btn-primary"
+            style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+            onClick={() => onNavigateToTab('clusters')}
+          >
+            Authenticate Clusters <ArrowRight size={14} />
+          </button>
+        </div>
+      )}
+
       {/* KPI Cards Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
         <div className="glass-panel" style={{ padding: '20px' }}>
@@ -30,8 +65,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Server size={20} color="var(--accent-cyan)" />
           </div>
           <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#FFFFFF' }}>{clusters.length}</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--accent-emerald)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <CheckCircle2 size={12} /> AWS EKS Live Connected
+          <div style={{ fontSize: '0.75rem', color: unauthClusters.length === 0 ? 'var(--accent-emerald)' : '#FBBF24', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            {unauthClusters.length === 0 ? (
+              <><CheckCircle2 size={12} /> All Clusters Authenticated</>
+            ) : (
+              <><AlertTriangle size={12} /> {clusters.length - unauthClusters.length}/{clusters.length} Authenticated</>
+            )}
           </div>
         </div>
 

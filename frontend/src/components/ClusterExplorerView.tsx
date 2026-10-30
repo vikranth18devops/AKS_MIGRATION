@@ -1,7 +1,20 @@
 import React, { useState } from 'react';
 import { Cluster, DiscoveredIngress } from '../types';
 import { api } from '../services/api';
-import { Server, CheckCircle2, ShieldCheck, Plus, RefreshCw, Layers, ArrowUpRight, Globe, Lock, Search } from 'lucide-react';
+import {
+  Server,
+  CheckCircle2,
+  ShieldCheck,
+  Plus,
+  RefreshCw,
+  ArrowUpRight,
+  Lock,
+  Search,
+  Key,
+  ShieldAlert,
+  ArrowRight,
+  AlertTriangle
+} from 'lucide-react';
 
 interface ClusterExplorerViewProps {
   clusters: Cluster[];
@@ -20,16 +33,23 @@ export const ClusterExplorerView: React.FC<ClusterExplorerViewProps> = ({
   const [showRegisterModal, setShowRegisterModal] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
 
+  // Authentication Gate State
+  const [authMethod, setAuthMethod] = useState<string>('AWS_IAM_ROLE');
+  const [authRoleArn, setAuthRoleArn] = useState<string>('arn:aws:iam::123456789012:role/kmm-eks-migration-role');
+  const [authToken, setAuthToken] = useState<string>('');
+  const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
+  const [authFeedback, setAuthFeedback] = useState<string | null>(null);
+
   // Register Form State
   const [newClusterName, setNewClusterName] = useState<string>('eks-payments-us-east-2');
   const [newCloudProvider, setNewCloudProvider] = useState<string>('AWS');
   const [newEnvironment, setNewEnvironment] = useState<string>('production');
   const [newApiEndpoint, setNewApiEndpoint] = useState<string>('https://B9C8D7E6F5.gr7.us-east-2.eks.amazonaws.com');
   const [newRoleArn, setNewRoleArn] = useState<string>('arn:aws:iam::123456789012:role/kmm-eks-migration-role');
-  const [testResult, setTestResult] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (selectedCluster) {
+      setAuthFeedback(null);
       loadIngresses(selectedCluster.id);
     }
   }, [selectedCluster]);
@@ -41,11 +61,24 @@ export const ClusterExplorerView: React.FC<ClusterExplorerViewProps> = ({
     setLoading(false);
   };
 
-  const handleTestConnection = async () => {
-    setLoading(true);
-    const res = await api.testClusterConnection(selectedCluster.id);
-    setTestResult(res.message);
-    setLoading(false);
+  const handleAuthenticateCluster = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsAuthenticating(true);
+    setAuthFeedback(null);
+    try {
+      const result = await api.authenticateCluster(selectedCluster.id, {
+        auth_method: authMethod,
+        role_arn: authRoleArn,
+        token: authToken
+      });
+      setAuthFeedback(result.message);
+      selectedCluster.is_authenticated = true;
+      selectedCluster.auth_method = authMethod;
+      await loadIngresses(selectedCluster.id);
+      onRefreshClusters();
+    } finally {
+      setIsAuthenticating(false);
+    }
   };
 
   const handleRegisterCluster = async (e: React.FormEvent) => {
@@ -70,35 +103,24 @@ export const ClusterExplorerView: React.FC<ClusterExplorerViewProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Header and Cluster Tabs */}
+      {/* Cluster Selection Header */}
       <div className="glass-panel" style={{ padding: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Server size={22} color="var(--accent-cyan)" />
-              <h2 style={{ fontSize: '1.4rem', margin: 0 }}>Kubernetes Cluster Management & Live Explorer</h2>
+              <h2 style={{ fontSize: '1.4rem', margin: 0 }}>Cluster Selection & Authentication Gate</h2>
             </div>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Inspect live NGINX Ingress resources, IngressClasses, backend services, and validate connectivity.
+              Authentication is strictly required before Ingress resources and Traefik migration items are unlocked.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <button className="btn-secondary" onClick={handleTestConnection} disabled={loading}>
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Test Connectivity
-            </button>
-            <button className="btn-primary" onClick={() => setShowRegisterModal(true)}>
-              <Plus size={16} /> Register Cluster
-            </button>
-          </div>
+          <button className="btn-primary" onClick={() => setShowRegisterModal(true)}>
+            <Plus size={16} /> Register Cluster
+          </button>
         </div>
 
-        {testResult && (
-          <div className="glass-panel" style={{ padding: '12px 18px', borderLeft: '4px solid var(--accent-emerald)', background: 'rgba(16, 185, 129, 0.08)', marginBottom: '20px' }}>
-            <span style={{ fontSize: '0.85rem', color: '#A7F3D0', fontWeight: 600 }}>{testResult}</span>
-          </div>
-        )}
-
-        {/* Cluster Selection Cards */}
+        {/* Cluster Tabs */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
           {clusters.map((c) => {
             const isSelected = selectedCluster?.id === c.id;
@@ -124,13 +146,19 @@ export const ClusterExplorerView: React.FC<ClusterExplorerViewProps> = ({
                   </span>
                 </div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-                  {c.api_endpoint.slice(0, 42)}...
+                  {c.api_endpoint.slice(0, 40)}...
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  <span>{c.kubernetes_version}</span>
-                  <span style={{ color: 'var(--accent-emerald)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <CheckCircle2 size={12} /> {c.status}
-                  </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', fontSize: '0.75rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>{c.environment}</span>
+                  {c.is_authenticated ? (
+                    <span className="badge badge-success" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <CheckCircle2 size={12} /> Authenticated
+                    </span>
+                  ) : (
+                    <span className="badge badge-warning" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Lock size={12} /> Auth Required
+                    </span>
+                  )}
                 </div>
               </div>
             );
@@ -138,99 +166,195 @@ export const ClusterExplorerView: React.FC<ClusterExplorerViewProps> = ({
         </div>
       </div>
 
-      {/* Discovered Ingress Resources Table */}
-      <div className="glass-panel" style={{ padding: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <div>
-            <h3 style={{ fontSize: '1.15rem', marginBottom: '4px' }}>
-              Live Discovered Ingress Inventory • {selectedCluster?.name}
-            </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Discovered {filteredIngresses.length} NGINX Ingress resources across {selectedCluster?.namespaces_count} namespaces.
-            </p>
-          </div>
-          <div style={{ position: 'relative', width: '280px' }}>
-            <Search size={16} color="var(--text-dim)" style={{ position: 'absolute', left: '12px', top: '10px' }} />
-            <input
-              type="text"
-              placeholder="Search host or ingress name..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px 8px 36px',
-                borderRadius: '8px',
-                background: 'rgba(0, 0, 0, 0.3)',
-                border: '1px solid var(--border-subtle)',
-                color: '#FFFFFF',
-                fontSize: '0.8rem',
-                outline: 'none'
-              }}
-            />
-          </div>
-        </div>
+      {/* CLUSTER AUTHENTICATION GATE */}
+      {!selectedCluster.is_authenticated ? (
+        <div className="glass-panel" style={{ padding: '32px', border: '1px solid rgba(245, 158, 11, 0.4)', background: 'linear-gradient(180deg, rgba(245, 158, 11, 0.06) 0%, rgba(11, 15, 23, 0.9) 100%)' }}>
+          <div style={{ maxWidth: '640px', margin: '0 auto', textAlign: 'center' }}>
+            <div style={{ width: '56px', height: '56px', borderRadius: '16px', background: 'rgba(245, 158, 11, 0.15)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+              <Lock size={28} color="#FBBF24" />
+            </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-dim)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
-                <th style={{ padding: '12px 16px' }}>Ingress Resource</th>
-                <th style={{ padding: '12px 16px' }}>Namespace</th>
-                <th style={{ padding: '12px 16px' }}>Hosts & Routing Rules</th>
-                <th style={{ padding: '12px 16px' }}>TLS Secrets</th>
-                <th style={{ padding: '12px 16px' }}>Annotations</th>
-                <th style={{ padding: '12px 16px', textAlign: 'right' }}>Migration Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredIngresses.map((ing) => (
-                <tr key={ing.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
-                  <td style={{ padding: '16px' }}>
-                    <div style={{ fontWeight: 600, color: '#FFFFFF', fontSize: '0.9rem' }}>{ing.name}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-                      Backends: {ing.backend_services.join(', ')}
-                    </div>
-                  </td>
-                  <td style={{ padding: '16px' }}>
-                    <span className="badge badge-purple" style={{ fontSize: '0.7rem' }}>
-                      {ing.namespace}
-                    </span>
-                  </td>
-                  <td style={{ padding: '16px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                      {ing.hosts.map((h, h_idx) => (
-                        <div key={h_idx} style={{ fontSize: '0.825rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>
-                          https://{h}
-                        </div>
-                      ))}
-                    </div>
-                  </td>
-                  <td style={{ padding: '16px' }}>
-                    <div style={{ fontSize: '0.8rem', color: '#CBD5E1', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Lock size={12} color="var(--accent-emerald)" />
-                      {ing.tls_secrets.join(', ')}
-                    </div>
-                  </td>
-                  <td style={{ padding: '16px' }}>
-                    <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
-                      {ing.annotations_count} Annotations
-                    </span>
-                  </td>
-                  <td style={{ padding: '16px', textAlign: 'right' }}>
-                    <button
-                      className="btn-primary"
-                      style={{ fontSize: '0.78rem', padding: '6px 14px' }}
-                      onClick={() => onInitiateMigration(selectedCluster.id, ing)}
-                    >
-                      Migrate to Traefik <ArrowUpRight size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            <h3 style={{ fontSize: '1.35rem', marginBottom: '8px' }}>
+              Cluster Authentication Required for {selectedCluster.name}
+            </h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '24px' }}>
+              To inspect live NGINX Ingress definitions, analyze annotations, and execute migrations to Traefik, you must first authenticate and verify RBAC permissions on this Kubernetes cluster.
+            </p>
+
+            <form onSubmit={handleAuthenticateCluster} style={{ textAlign: 'left', background: 'rgba(0, 0, 0, 0.35)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
+                  Authentication Mechanism
+                </label>
+                <select
+                  value={authMethod}
+                  onChange={(e) => setAuthMethod(e.target.value)}
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', background: '#1E293B', border: '1px solid var(--border-subtle)', color: '#FFFFFF', outline: 'none', fontSize: '0.85rem' }}
+                >
+                  <option value="AWS_IAM_ROLE">AWS IAM Role (EKS IRSA / Pod Identity)</option>
+                  <option value="SERVICE_ACCOUNT_TOKEN">Kubernetes Service Account Token</option>
+                  <option value="AZURE_WORKLOAD_IDENTITY">Azure Workload Identity (AKS)</option>
+                  <option value="OIDC_KUBECONFIG">OIDC / Bearer Token Kubeconfig</option>
+                </select>
+              </div>
+
+              {authMethod === 'AWS_IAM_ROLE' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
+                    IAM Role ARN
+                  </label>
+                  <input
+                    type="text"
+                    value={authRoleArn}
+                    onChange={(e) => setAuthRoleArn(e.target.value)}
+                    placeholder="arn:aws:iam::123456789012:role/kmm-eks-migration-role"
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--border-subtle)', color: '#FFFFFF', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}
+                    required
+                  />
+                </div>
+              )}
+
+              {authMethod === 'SERVICE_ACCOUNT_TOKEN' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
+                    Service Account Bearer Token
+                  </label>
+                  <textarea
+                    value={authToken}
+                    onChange={(e) => setAuthToken(e.target.value)}
+                    placeholder="eyJhbGciOiJSUzI1NiIsImtpZCI6..."
+                    rows={3}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--border-subtle)', color: '#FFFFFF', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '0.78rem' }}
+                    required
+                  />
+                </div>
+              )}
+
+              {/* Required RBAC Checklist */}
+              <div style={{ padding: '12px 16px', borderRadius: '8px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase' }}>
+                  RBAC Permissions to be Verified:
+                </span>
+                <ul style={{ listStyle: 'none', padding: 0, marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <CheckCircle2 size={12} color="var(--accent-cyan)" /> <code>networking.k8s.io/v1 Ingresses</code>: get, list, watch
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <CheckCircle2 size={12} color="var(--accent-cyan)" /> <code>traefik.io/v1alpha1 IngressRoute & Middleware</code>: create, patch
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <CheckCircle2 size={12} color="var(--accent-cyan)" /> <code>v1 Secrets & ConfigMaps</code>: read TLS certificates & headers
+                  </li>
+                </ul>
+              </div>
+
+              <button type="submit" className="btn-primary" style={{ justifyContent: 'center', padding: '12px' }} disabled={isAuthenticating}>
+                <Key size={16} /> {isAuthenticating ? 'Authenticating & Verifying RBAC...' : 'Authenticate & Unlock Ingress Resources'}
+              </button>
+            </form>
+          </div>
         </div>
-      </div>
+      ) : (
+        /* DISCOVERED INGRESS TABLE (DISPLAYED ONLY AFTER AUTHENTICATION) */
+        <div className="glass-panel" style={{ padding: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <CheckCircle2 size={18} color="var(--accent-emerald)" />
+                <h3 style={{ fontSize: '1.15rem', margin: 0 }}>
+                  Discovered Ingress Inventory • {selectedCluster?.name}
+                </h3>
+                <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>
+                  Session Authenticated
+                </span>
+              </div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                Cluster authenticated via {selectedCluster.auth_method || 'AWS IAM Role'}. Showing live discovered resources.
+              </p>
+            </div>
+            <div style={{ position: 'relative', width: '280px' }}>
+              <Search size={16} color="var(--text-dim)" style={{ position: 'absolute', left: '12px', top: '10px' }} />
+              <input
+                type="text"
+                placeholder="Search host or ingress name..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px 8px 36px',
+                  borderRadius: '8px',
+                  background: 'rgba(0, 0, 0, 0.3)',
+                  border: '1px solid var(--border-subtle)',
+                  color: '#FFFFFF',
+                  fontSize: '0.8rem',
+                  outline: 'none'
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-dim)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
+                  <th style={{ padding: '12px 16px' }}>Ingress Resource</th>
+                  <th style={{ padding: '12px 16px' }}>Namespace</th>
+                  <th style={{ padding: '12px 16px' }}>Hosts & Routing Rules</th>
+                  <th style={{ padding: '12px 16px' }}>TLS Secrets</th>
+                  <th style={{ padding: '12px 16px' }}>Annotations</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'right' }}>Migration Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredIngresses.map((ing) => (
+                  <tr key={ing.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                    <td style={{ padding: '16px' }}>
+                      <div style={{ fontWeight: 600, color: '#FFFFFF', fontSize: '0.9rem' }}>{ing.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                        Backends: {ing.backend_services.join(', ')}
+                      </div>
+                    </td>
+                    <td style={{ padding: '16px' }}>
+                      <span className="badge badge-purple" style={{ fontSize: '0.7rem' }}>
+                        {ing.namespace}
+                      </span>
+                    </td>
+                    <td style={{ padding: '16px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        {ing.hosts.map((h, h_idx) => (
+                          <div key={h_idx} style={{ fontSize: '0.825rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>
+                            https://{h}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td style={{ padding: '16px' }}>
+                      <div style={{ fontSize: '0.8rem', color: '#CBD5E1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Lock size={12} color="var(--accent-emerald)" />
+                        {ing.tls_secrets.join(', ')}
+                      </div>
+                    </td>
+                    <td style={{ padding: '16px' }}>
+                      <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
+                        {ing.annotations_count} Annotations
+                      </span>
+                    </td>
+                    <td style={{ padding: '16px', textAlign: 'right' }}>
+                      <button
+                        className="btn-primary"
+                        style={{ fontSize: '0.78rem', padding: '6px 14px' }}
+                        onClick={() => onInitiateMigration(selectedCluster.id, ing)}
+                      >
+                        Migrate to Traefik <ArrowUpRight size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Register Cluster Modal */}
       {showRegisterModal && (
@@ -328,7 +452,7 @@ export const ClusterExplorerView: React.FC<ClusterExplorerViewProps> = ({
                   Cancel
                 </button>
                 <button type="submit" className="btn-primary">
-                  Connect & Validate Cluster
+                  Connect & Register Cluster
                 </button>
               </div>
             </form>

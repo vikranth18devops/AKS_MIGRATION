@@ -10,7 +10,7 @@ from app.core.security import TokenPayload, get_current_user
 from app.models.auth import User
 from app.models.backup import Backup
 from app.models.cutover import Approval, CutoverExecution, CutoverPlan, RollbackExecution
-from app.models.infrastructure import Application, Cluster, Namespace
+from app.models.infrastructure import Application, Cluster, ClusterCredential, Namespace
 from app.models.migration import (
     Assessment,
     AssessmentFinding,
@@ -37,6 +37,19 @@ from app.services.traefik_adapter import TraefikAdapter
 
 router = APIRouter()
 
+async def verify_cluster_authenticated(db: AsyncSession, cluster_id: UUID) -> Cluster:
+    cluster = await db.get(Cluster, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+    cred_res = await db.execute(select(ClusterCredential).where(ClusterCredential.cluster_id == cluster_id))
+    cred = cred_res.scalar_one_or_none()
+    if not cred or cred.validation_status not in ("AUTHENTICATED", "VALIDATED"):
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail=f"Cluster authentication required. Cluster '{cluster.name}' must be authenticated before accessing migration items or executing migration operations."
+        )
+    return cluster
+
 @router.get("", response_model=List[MigrationResponse])
 async def list_migrations(
     db: AsyncSession = Depends(get_db),
@@ -52,10 +65,8 @@ async def create_migration(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user)
 ):
-    # Verify cluster exists
-    cluster = await db.get(Cluster, migration_in.cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="Cluster not found")
+    # Verify cluster exists and is authenticated
+    cluster = await verify_cluster_authenticated(db, migration_in.cluster_id)
 
     # Find or create namespace
     ns_res = await db.execute(
@@ -196,6 +207,8 @@ async def assess_migration(
     if not migration:
         raise HTTPException(status_code=404, detail="Migration not found")
 
+    cluster = await verify_cluster_authenticated(db, migration.cluster_id)
+
     app = await db.get(Application, migration.application_id)
     host = app.production_url.replace("https://", "").replace("http://", "").split("/")[0]
 
@@ -325,6 +338,8 @@ async def get_configuration_diff(
     if not migration:
         raise HTTPException(status_code=404, detail="Migration not found")
 
+    await verify_cluster_authenticated(db, migration.cluster_id)
+
     app = await db.get(Application, migration.application_id)
     host = app.production_url.replace("https://", "").replace("http://", "").split("/")[0]
 
@@ -403,6 +418,8 @@ async def create_backup(
     if not migration:
         raise HTTPException(status_code=404, detail="Migration not found")
 
+    await verify_cluster_authenticated(db, migration.cluster_id)
+
     encryption_key = b"01234567890123456789012345678901"  # 32 bytes AES-256
     backup_data = BackupEngine.create_backup_archive(
         migration_id=str(migration_id),
@@ -449,6 +466,8 @@ async def deploy_target_controller(
     migration = await db.get(Migration, migration_id)
     if not migration:
         raise HTTPException(status_code=404, detail="Migration not found")
+
+    await verify_cluster_authenticated(db, migration.cluster_id)
 
     app = await db.get(Application, migration.application_id)
     prod_host = app.production_url.replace("https://", "").replace("http://", "").split("/")[0]
@@ -521,6 +540,8 @@ async def submit_developer_approval(
     if not migration:
         raise HTTPException(status_code=404, detail="Migration not found")
 
+    await verify_cluster_authenticated(db, migration.cluster_id)
+
     user_res = await db.execute(select(User).where(User.email == current_user.email))
     dev_user = user_res.scalar_one_or_none()
     if not dev_user:
@@ -569,6 +590,8 @@ async def request_production_cutover(
     migration = await db.get(Migration, migration_id)
     if not migration:
         raise HTTPException(status_code=404, detail="Migration not found")
+
+    await verify_cluster_authenticated(db, migration.cluster_id)
 
     new_plan = CutoverPlan(
         migration_id=migration_id,
@@ -656,6 +679,8 @@ async def execute_cutover(
     if not migration:
         raise HTTPException(status_code=404, detail="Migration not found")
 
+    await verify_cluster_authenticated(db, migration.cluster_id)
+
     # Safety Gate: Must be in APPROVED_FOR_CUTOVER state
     if migration.current_state != "APPROVED_FOR_CUTOVER":
         raise HTTPException(
@@ -664,11 +689,15 @@ async def execute_cutover(
         )
 
     user_res = await db.execute(select(User).where(User.email == current_user.email))
-    user = user_res.scalar_one_or_none() or User(email=current_user.email, full_name="DevOps")
+    user = user_res.scalar_one_or_none()
+    if not user:
+        user = User(email=current_user.email, full_name="DevOps Engineer")
+        db.add(user)
+        await db.flush()
 
     # Fetch cutover plan
     plan_res = await db.execute(select(CutoverPlan).where(CutoverPlan.migration_id == migration_id))
-    plan = plan_res.scalar_one_or_none()
+    plan = plan_res.scalars().first()
     if not plan:
         plan = CutoverPlan(
             migration_id=migration_id,
@@ -682,7 +711,7 @@ async def execute_cutover(
     execution = CutoverExecution(
         cutover_plan_id=plan.id,
         migration_id=migration_id,
-        executed_by_user_id=user.id if hasattr(user, 'id') else uuid.uuid4(),
+        executed_by_user_id=user.id,
         status="CUTTING_OVER",
         target_group_arn_before="arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/kmm-nginx-prod/111",
         target_group_arn_after="arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/kmm-traefik-migration/222",
@@ -717,12 +746,42 @@ async def execute_rollback(
     if not migration:
         raise HTTPException(status_code=404, detail="Migration not found")
 
+    await verify_cluster_authenticated(db, migration.cluster_id)
+
     # Fetch last cutover execution
     exec_res = await db.execute(select(CutoverExecution).where(CutoverExecution.migration_id == migration_id))
-    execution = exec_res.scalar_one_or_none()
+    execution = exec_res.scalars().first()
+    if not execution:
+        plan_res = await db.execute(select(CutoverPlan).where(CutoverPlan.migration_id == migration_id))
+        plan = plan_res.scalars().first()
+        if not plan:
+            plan = CutoverPlan(
+                migration_id=migration_id,
+                version_id=migration.active_version_id or uuid.uuid4(),
+                scheduled_window_start=datetime.now(timezone.utc),
+                scheduled_window_end=datetime.now(timezone.utc)
+            )
+            db.add(plan)
+            await db.flush()
+
+        user_res = await db.execute(select(User).where(User.email == current_user.email))
+        user = user_res.scalar_one_or_none()
+        if not user:
+            user = User(email=current_user.email, full_name="DevOps Engineer")
+            db.add(user)
+            await db.flush()
+
+        execution = CutoverExecution(
+            cutover_plan_id=plan.id,
+            migration_id=migration_id,
+            executed_by_user_id=user.id,
+            status="CUTTING_OVER"
+        )
+        db.add(execution)
+        await db.flush()
 
     rollback = RollbackExecution(
-        cutover_execution_id=execution.id if execution else uuid.uuid4(),
+        cutover_execution_id=execution.id,
         migration_id=migration_id,
         reason=request.reason,
         restored_target_group_arn="arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/kmm-nginx-prod/111",

@@ -35,6 +35,8 @@ export interface Cluster {
   api_endpoint: string;
   kubernetes_version: string;
   status: 'ACTIVE' | 'DEGRADED' | 'DISCONNECTED';
+  is_authenticated: boolean;
+  auth_method?: string;
   namespaces_count: number;
   ingress_controllers: string[];
   created_at: string;
