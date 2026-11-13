@@ -30,7 +30,7 @@ export type MigrationState =
 export interface Cluster {
   id: string;
   name: string;
-  cloud_provider: 'AWS' | 'Azure' | 'GCP' | 'On-Premises';
+  cloud_provider: 'AWS' | 'Azure' | 'GCP' | 'Google Cloud' | 'On-Premises';
   environment: 'production' | 'staging' | 'development';
   api_endpoint: string;
   kubernetes_version: string;
@@ -38,6 +38,59 @@ export interface Cluster {
   is_authenticated: boolean;
   auth_method?: string;
   namespaces_count: number;
+  namespaces_list?: string[];
+  nodes_list?: {
+    name: string;
+    role: string;
+    status: string;
+    cpu: string;
+    cpuUsage?: string;
+    memory: string;
+    memUsage?: string;
+    kernel?: string;
+    internalIp?: string;
+    conditions?: string;
+  }[];
+  pods_list?: {
+    name: string;
+    namespace: string;
+    ready?: string;
+    status: string;
+    restarts?: number;
+    cpu?: string;
+    memory?: string;
+    node?: string;
+    age?: string;
+  }[];
+  nodes_count?: number;
+  node_type?: string;
+  workloads_count?: number;
+  workloads?: {
+    pods: number;
+    deployments: number;
+    statefulsets: number;
+    daemonsets: number;
+    services: number;
+  };
+  components_in_use?: {
+    current_ingress: string;
+    target_ingress: string;
+    gateway_api_crds: string;
+    cert_manager: string;
+    cni_plugin: string;
+    alb_controller: string;
+  };
+  migration_status?: {
+    state: string;
+    phase: string;
+    progress_percent: number;
+    source_controller: string;
+    target_controller: string;
+    traffic_split_percent: number;
+    has_verified_backup: boolean;
+    backup_storage: string;
+    zero_downtime_guarantee: string;
+  };
   ingress_controllers: string[];
   created_at: string;
 }
@@ -159,3 +212,43 @@ export interface MonitoringMetric {
   latency_p99_ms: number;
   active_connections: number;
 }
+
+export interface CheckItem {
+  id: string;
+  category?: string;
+  name: string;
+  status: 'PASSED' | 'WARNING' | 'FAILED';
+  details: string;
+  latency_ms?: number;
+  evidence?: Record<string, any>;
+}
+
+export interface PrerequisitesValidationResponse {
+  cluster_id: string;
+  cluster_name: string;
+  cloud_provider: string;
+  overall_status: 'PASSED' | 'WARNING' | 'FAILED';
+  all_prerequisites_met: boolean;
+  checks: CheckItem[];
+  validated_at: string;
+  message: string;
+}
+
+export interface TraefikReadinessResponse {
+  migration_id: string;
+  target_controller: string;
+  overall_status: string;
+  all_checks_passed: boolean;
+  checks: CheckItem[];
+  migration_impact_summary: {
+    source_controller: string;
+    target_controller: string;
+    ingress_resource: string;
+    production_hostname: string;
+    temporary_runtime_url: string;
+    cluster_changes: string[];
+  };
+  validated_at: string;
+  message: string;
+}
+

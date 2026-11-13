@@ -33,50 +33,50 @@ export const DeveloperPortal: React.FC<DeveloperPortalProps> = ({ migration, onR
         corsHeader: 'Access-Control-Allow-Origin: *'
       });
       setTestingStatus('PASSED');
-    }, 1200);
+    }, 1000);
   };
 
   const handleSubmitApproval = async (status: 'APPROVED' | 'REJECTED') => {
     await api.submitDeveloperApproval(migration.id, status, comments);
-    setSubmittedMessage(`Developer sign-off submitted as ${status}. DevOps team notified.`);
+    setSubmittedMessage(`Developer sign-off submitted as ${status}. DevOps Lead cutover window unlocked.`);
     onRefresh();
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div className="glass-panel" style={{ padding: '24px' }}>
+      <div className="glass-panel" style={{ padding: '24px', background: '#FFFFFF' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
             <span className="badge badge-purple" style={{ marginBottom: '8px' }}>Developer Validation Portal</span>
-            <h2 style={{ fontSize: '1.4rem', marginTop: '4px' }}>Pre-Production Application Validation</h2>
+            <h2 style={{ fontSize: '1.4rem', marginTop: '4px', color: '#0F172A' }}>Pre-Production Application Validation</h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
               Validate your application behavior through Traefik using isolated runtime URLs before production cutover.
             </p>
           </div>
-          <div style={{ padding: '8px 14px', borderRadius: '8px', background: 'rgba(6, 182, 212, 0.1)', border: '1px solid var(--border-highlight)' }}>
-            <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', fontWeight: 600 }}>Active Version: v1.0</span>
+          <div style={{ padding: '8px 14px', borderRadius: '8px', background: '#F0F9FF', border: '1px solid #BAE6FD' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', fontWeight: 700 }}>Active Version: v1.0</span>
           </div>
         </div>
 
         {submittedMessage && (
-          <div className="glass-panel" style={{ padding: '12px 20px', borderLeft: '4px solid var(--accent-emerald)', background: 'rgba(16, 185, 129, 0.08)', marginBottom: '20px' }}>
-            <span style={{ fontSize: '0.85rem', color: '#A7F3D0', fontWeight: 600 }}>{submittedMessage}</span>
+          <div className="glass-panel" style={{ padding: '12px 20px', borderLeft: '4px solid #059669', background: '#ECFDF5', marginBottom: '20px' }}>
+            <span style={{ fontSize: '0.85rem', color: '#065F46', fontWeight: 600 }}>{submittedMessage}</span>
           </div>
         )}
 
         {/* Hostname Mapping Card */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
-          <div style={{ padding: '16px 20px', borderRadius: '10px', background: 'rgba(0, 0, 0, 0.25)', border: '1px solid var(--border-subtle)' }}>
+        <div className="grid-responsive-1-2" style={{ gap: '16px', marginBottom: '24px' }}>
+          <div style={{ padding: '16px 20px', borderRadius: '10px', background: '#F8FAFC', border: '1px solid var(--border-subtle)' }}>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>Production URL (NGINX)</span>
-            <div style={{ fontSize: '1.05rem', fontWeight: 600, color: '#FFFFFF', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
+            <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0F172A', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
               {migration.production_url || 'https://payments.company.com'}
             </div>
             <span className="badge badge-success" style={{ marginTop: '8px', fontSize: '0.65rem' }}>Active Production</span>
           </div>
 
-          <div style={{ padding: '16px 20px', borderRadius: '10px', background: 'rgba(6, 182, 212, 0.08)', border: '1px solid var(--border-highlight)' }}>
+          <div style={{ padding: '16px 20px', borderRadius: '10px', background: '#F0F9FF', border: '1px solid #BAE6FD' }}>
             <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', textTransform: 'uppercase', fontWeight: 700 }}>Runtime Testing URL (Traefik)</span>
-            <div style={{ fontSize: '1.05rem', fontWeight: 600, color: '#FFFFFF', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
+            <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0284C7', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
               https://{migration.runtime_url || 'runtime-payments.company.com'}
             </div>
             <span className="badge badge-info" style={{ marginTop: '8px', fontSize: '0.65rem' }}>Traefik Target Ready</span>
@@ -84,10 +84,10 @@ export const DeveloperPortal: React.FC<DeveloperPortalProps> = ({ migration, onR
         </div>
 
         {/* Live Synthetic Probe Section */}
-        <div style={{ padding: '20px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-subtle)', marginBottom: '24px' }}>
+        <div style={{ padding: '20px', borderRadius: '12px', background: '#F8FAFC', border: '1px solid var(--border-subtle)', marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <div>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>Automated Synthetic Smoke Prober</h3>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#0F172A' }}>Automated Synthetic Smoke Prober</h3>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Probes live HTTP response, TLS handshake & middleware headers.</p>
             </div>
             <button className="btn-primary" onClick={handleRunSmokeTest} disabled={testingStatus === 'TESTING'}>
@@ -96,14 +96,14 @@ export const DeveloperPortal: React.FC<DeveloperPortalProps> = ({ migration, onR
           </div>
 
           {probeResult && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', padding: '16px', borderRadius: '8px', background: 'rgba(0, 0, 0, 0.35)' }}>
+            <div className="grid-responsive-1-4" style={{ gap: '12px', padding: '16px', borderRadius: '8px', background: '#FFFFFF', border: '1px solid #E2E8F0' }}>
               <div>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>HTTP Status</span>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#34D399' }}>{probeResult.statusCode} OK</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#059669' }}>{probeResult.statusCode} OK</div>
               </div>
               <div>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>P95 Latency</span>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#FFFFFF' }}>{probeResult.latencyMs} ms</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0F172A' }}>{probeResult.latencyMs} ms</div>
               </div>
               <div>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>TLS Handshake</span>
@@ -119,8 +119,8 @@ export const DeveloperPortal: React.FC<DeveloperPortalProps> = ({ migration, onR
 
         {/* Developer Sign-off Checklist */}
         <div style={{ marginBottom: '24px' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '12px' }}>Application Owner Verification Checklist</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '12px', color: '#0F172A' }}>Application Owner Verification Checklist</h3>
+          <div className="grid-responsive-1-3" style={{ gap: '12px' }}>
             {Object.entries({
               auth: 'User Login & Auth Token Forwarding',
               cors: 'CORS & Cross-Origin Requests',
@@ -137,7 +137,7 @@ export const DeveloperPortal: React.FC<DeveloperPortalProps> = ({ migration, onR
                   gap: '10px',
                   padding: '12px 14px',
                   borderRadius: '8px',
-                  background: 'rgba(255, 255, 255, 0.03)',
+                  background: '#FFFFFF',
                   border: '1px solid var(--border-subtle)',
                   cursor: 'pointer',
                   fontSize: '0.825rem'
@@ -149,7 +149,7 @@ export const DeveloperPortal: React.FC<DeveloperPortalProps> = ({ migration, onR
                   onChange={(e) => setChecklist({ ...checklist, [key]: e.target.checked })}
                   style={{ accentColor: 'var(--accent-cyan)', width: '16px', height: '16px' }}
                 />
-                <span style={{ color: checklist[key as keyof typeof checklist] ? '#FFFFFF' : 'var(--text-dim)' }}>{label}</span>
+                <span style={{ color: checklist[key as keyof typeof checklist] ? '#0F172A' : 'var(--text-dim)', fontWeight: 500 }}>{label}</span>
               </label>
             ))}
           </div>
@@ -168,9 +168,9 @@ export const DeveloperPortal: React.FC<DeveloperPortalProps> = ({ migration, onR
               width: '100%',
               padding: '12px',
               borderRadius: '8px',
-              background: '#0B0F19',
-              border: '1px solid var(--border-subtle)',
-              color: '#FFFFFF',
+              background: '#FFFFFF',
+              border: '1px solid var(--border-strong)',
+              color: '#0F172A',
               fontSize: '0.85rem',
               outline: 'none',
               resize: 'vertical'
@@ -179,7 +179,7 @@ export const DeveloperPortal: React.FC<DeveloperPortalProps> = ({ migration, onR
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button className="btn-secondary" style={{ borderColor: 'var(--accent-rose)', color: '#F87171' }} onClick={() => handleSubmitApproval('REJECTED')}>
+          <button className="btn-secondary" style={{ borderColor: '#FECDD3', color: '#BE123C' }} onClick={() => handleSubmitApproval('REJECTED')}>
             <XCircle size={16} /> Submit Rejection (Requires Fix)
           </button>
           <button className="btn-primary" onClick={() => handleSubmitApproval('APPROVED')}>

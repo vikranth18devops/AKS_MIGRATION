@@ -11,6 +11,12 @@ class MigrationCreate(BaseModel):
     production_url: str
     target_controller: str = "TRAEFIK"
 
+class MigrationUpdate(BaseModel):
+    name: Optional[str] = None
+    target_controller: Optional[str] = None
+    current_state: Optional[str] = None
+    production_url: Optional[str] = None
+
 class MigrationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
